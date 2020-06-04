@@ -1,0 +1,549 @@
+---
+title: "Atividade Integradora"
+author: "Nanci, Helena, Luiz"
+date: "4/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Atividade Integradora
+
+#### Helena Boin Gaidys
+#### Luiz Gustavo Mauro Cardoso
+#### Nanci Utida
+
+# 1) Objetivo
+
+O objetivo da atividade consiste em criar um classificador de satisfação (alta ou baixa) de clientes com bom desempenho preditivo. Para isso, fizemos a organização, limpeza e análise gráfica no Python. A modelagem preditiva e avaliação dos modelos aplicados a esses dados foi feita no R. 
+
+```{r, include=FALSE, warning=FALSE}
+
+#conjunto de pacotes com propósitos gerais
+if(!require(tidyverse)){install.packages("tidyverse")}
+
+#análise exploratória 
+#estatísticas de resumo úteis
+if(!require(skimr)){install.packages("skimr")}
+
+#métodos
+#seleção de subconjuntos
+if(!require(leaps)){install.packages("leaps")}
+#regularização
+if(!require(glmnet)){install.packages("glmnet")}
+#gráficos da regularização
+if(!require(plotmo)){install.packages("plotmo")}
+#árvores
+if(!require(rpart)){install.packages("rpart")}
+if(!require(partykit)){install.packages("partykit")}
+if(!require(rpart.plot)){install.packages("rpart.plot")}
+#bagging
+if(!require(ipred)){install.packages("ipred")}
+#random forest
+if(!require(randomForest)){install.packages("randomForest")}
+#Boosting
+if(!require(gbm)){install.packages("gbm")}
+
+
+```
+
+```{r}
+library(caret)
+
+```
+
+
+# 2) Leitura da base
+```{r, warning=FALSE}
+df <- read_csv("data/Dataframe.csv")
+
+```
+
+# 3) Exploração da base
+```{r}
+
+df %>% glimpse
+skimr::skim(df)
+
+```
+
+# 4) Ajustando dados
+
+### Trocando respostas de satisfação geral de character para factor
+```{r}
+df$satisfacao <- factor(df$satisfacao, levels = c("Baixo","Alto"))
+```
+
+### Trocando respostas de Satisfação de character para factor
+```{r}
+cols_to_change <- c('facil_entend','cumpr_prometido','fzr_rcbr_lig','quali_lig',
+                    'cobranca_correta','clareza_conta','val_recarga')
+
+for(i in cols_to_change){
+  
+  df[[i]] <- factor(df[[i]], levels = c("NS", "Baixo","Alto"))
+}
+
+cols_to_change_2 <- c('acesso_internet','manter_conex','veloc_internet','espera_atend',
+                      'repetir_demanda','clareza_atend','quali_atend_tel','quali_atend_internet',
+                      'quali_atend_loja','res_prob_cobranca','res_prob_lig','res_prob_internet')
+
+for(i in cols_to_change_2){
+  
+  df[[i]] <- factor(df[[i]], levels = c("NS","Não", "Baixo","Alto"))
+}
+```
+ 
+### Trocando respostas de Sim e Não de character para factor
+```{r}
+cols_to_change_3 <- c('responsavel_recarga','servico_conc')
+
+for(i in cols_to_change_3){
+  
+  df[[i]] <- factor(df[[i]], levels = c("NS","Não","Sim"))
+}
+```
+ 
+### Trocando respostas de salário de character para factor
+```{r}
+df$salario <- factor(df$salario, levels = c("SR/Rec","até 4 SM","de 4 a 6 SM","de 6 a 10 SM","acima de 10 SM"))
+```
+ 
+### Trocando respostas de faixa de idade de character para factor
+```{r}
+df$faixa_idade <- factor(df$faixa_idade, levels = c("Recusa","Menor de 16 anos","De 16 a 17 anos","De 18 a 24 anos",
+                                                    "De 25 a 30 anos","De 31 a 35 anos","De 36 a 40 anos","De 41 a 50 anos",
+                                                    "De 51 a 70 anos", "Mais de 70 anos"))
+```
+ 
+### Trocando respostas de faixa de idade de character para factor
+```{r}
+df$sexo <- factor(df$sexo, levels = c("Feminino", "Masculino"))
+```
+ 
+### Trocando respostas de operadora de character para factor
+```{r}
+df$OPERADORA <- factor(df$OPERADORA)
+```
+ 
+### Trocando respostas de Estado de character para factor
+```{r}
+df$ESTADO <- factor(df$ESTADO)
+```
+ 
+### Verificando se está tudo ok
+```{r}
+df %>% glimpse
+skimr::skim(df)
+```
+### Gráfico da satisfação geral
+
+```{r, include=FALSE}
+library(scales)
+```
+
+```{r, echo=FALSE}  
+ggplot(df,aes(x=as.factor(satisfacao),y=percent())) +
+  geom_bar(aes(y = (..count..)/sum(..count..)), fill = "blue") +
+  geom_text(aes(y = ((..count..)/sum(..count..)),
+                label=scales::percent((..count..)/sum(..count..))),stat="count", vjust = -0.25)+
+  scale_y_continuous(labels = percent) + labs(y = "Percentual",x="Satisfação")+
+  ggtitle("Satisfação Geral")+
+  theme(aspect.ratio = 0.8)
+
+ # theme_bw()
+```
+
+
+
+
+# 5) Modelagem 
+
+
+
+### Base de treino e teste 
+  
+```{r}  
+  set.seed(123)
+  treino <- sample(nrow(df), .80*nrow(df), replace = FALSE)
+  
+  df_train <- df[treino,]
+  df_test <- df[-treino,]
+    
+```  
+
+## 5.1) Boosting 
+
+```{r}  
+  dados_tr <- df_train
+  dados_test <- df_test
+  
+  dados_tr$satisfacao <- ifelse(dados_tr$satisfacao == "Alto", 1, 0)
+  dados_test$satisfacao <- ifelse(dados_test$satisfacao == "Alto", 1, 0)
+```
+
+```{r}
+
+  (fit_bst <- gbm(satisfacao ~ ., distribution = "bernoulli", 
+                  n.trees = 1000, interaction.depth = 4, 
+                  shrinkage = 0.05, data = dados_tr))
+```
+
+```{r} 
+  summary(fit_bst)
+```  
+ 
+### iterações
+ 
+```{r}  
+  set.seed(123)
+  
+  fit_cv <- gbm(satisfacao ~ ., data = dados_tr, cv.folds = 5,
+                n.trees = 2000, interaction.depth = 2, 
+                shrinkage = 0.1)
+```
+
+
+```{r} 
+  gbm.perf(fit_cv, method = "cv")
+```  
+
+### partial dependence plot
+```{r}  
+  plot(fit_bst, i = "cumpr_prometido", lwd = 3)
+```  
+### Avaliação preditiva
+```{r}  
+  prob_bst <- predict(fit_cv, dados_test, n.trees = 399,
+                  type = "response")
+  
+  pred_bst <- ifelse(prob_bst >= .75, 
+                     "Alto", "Baixo")
+```  
+  
+### Resultados
+  
+```{r}  
+resultados_bst <- tibble(observado = df_test$satisfacao, 
+                         predito = pred_bst,
+                         probabilidade = prob_bst)
+resultados_bst$predito <- factor(resultados_bst$predito,levels = c("Baixo","Alto") )
+
+resultados_bst
+```
+  
+    
+### Erro
+```{r}
+  mean(df_test$satisfacao != pred_bst)
+    
+erro_bst <- mean(df_test$satisfacao != pred_bst)
+```   
+ 
+ 
+## 5.2) Regressão logística 
+  
+### Ajustando o modelo
+```{r}
+  fit_log <- glm(satisfacao ~ ., data = df_train, family = "binomial")
+```
+
+```{r}
+summary(fit_log)
+``` 
+  
+  
+### resultados
+### valores preditos
+
+```{r, warning=FALSE}
+    prob_log <- predict(fit_log, newdata = df_test)
+   
+    pred_log <- ifelse(prob_log >= .75, "Alto", "Baixo")
+```
+    
+```{r}
+resultados_log <- tibble(observado = df_test$satisfacao, 
+                         predito = pred_log,
+                         probabilidade = prob_log)  
+resultados_log$predito <- factor(resultados_log$predito, levels = c("Baixo","Alto"))
+resultados_log
+```
+
+### Erro
+```{r}
+ erro_log <- mean(df_test$satisfacao != pred_log)
+erro_log
+```
+    
+
+   
+## Regularização
+
+```{r}
+  x <- model.matrix(satisfacao ~ ., data = df)[,-which(names(df) %in% c("satisfacao"))]
+  y <- factor(df$satisfacao) 
+```    
+
+## 5.3)  Ridge 
+
+```{r}
+    met_ridge <- glmnet::glmnet(x[treino,], y[treino], alpha = 0, nlambda = 500, family = "binomial")
+    
+    #resumo
+    plotmo::plot_glmnet(met_ridge)
+```    
+### ajustando novamento o modelo com o lambda obtido a partir da validação cruzada
+```{r}
+set.seed(123)
+    met_ridge <- glmnet::cv.glmnet(x[treino,], y[treino], alpha = 0, family = "binomial")
+    
+    #resumo
+    plot(met_ridge)
+```    
+### obtendo o menor lambda
+```{r}
+lambda_ridge <- met_ridge$lambda.min
+```    
+
+### coeficientes
+```{r}
+  coef_ridge <- predict(met_ridge, s = lambda_ridge, type = "coef")
+```
+      
+### predição
+```{r}      
+      prob_ridge <- predict(met_ridge, newx = x[-treino,], s = lambda_ridge, type="response")
+
+pred_ridge1 <- ifelse(prob_ridge >= .75, 1, 0)
+    
+      pred_ridge <- ifelse(prob_ridge >= .75, "Alto", "Baixo")
+```
+
+### resultados
+
+```{r}
+resultados_ridge <- tibble(observado = df_test$satisfacao, 
+                           predito = pred_ridge,
+                           probabilidade = prob_ridge)
+resultados_ridge$predito <- factor(resultados_ridge$predito, levels = c("Baixo","Alto"))
+
+
+                         
+```      
+
+```{r}
+resultados_ridge
+
+```
+   
+### erro   
+```{r}
+erro_ridge <- mean(dados_test$satisfacao != pred_ridge1)  
+erro_ridge
+      
+```
+
+## 5.4) Lasso 
+      
+```{r}
+met_lasso <- glmnet::glmnet(x[treino,], y[treino], alpha = 1, nlambda = 500, family = "binomial")
+      
+    #resumo
+    plotmo::plot_glmnet(met_lasso)
+```   
+   
+### ajustando novamento o modelo com o lambda obtido a partir da validação cruzada
+```{r}
+set.seed(123)
+    met_lasso <- glmnet::cv.glmnet(x[treino,], y[treino], alpha = 1, family = "binomial")
+    
+    #resumo
+    plot(met_lasso)
+```
+ 
+### best lambda
+```{r}
+ lambda_lasso <- met_lasso$lambda.min
+    
+    #resultados
+      #coeficientes
+      coef_lasso <- predict(met_lasso, s = lambda_lasso, type="coef")
+```      
+### predição
+```{r}   
+prob_lasso <- predict(met_lasso, newx = x[-treino,], s = lambda_lasso)
+      
+pred_lasso <- ifelse(prob_lasso >= .75, "Alto", "Baixo")
+pred_lasso1 <- ifelse(prob_lasso >= .75, 1, 0)
+```
+      
+### resultados
+
+```{r}
+resultados_lasso <- tibble(observado = df_test$satisfacao, 
+                           predito = pred_lasso,
+                           probabilidade = prob_lasso)
+resultados_lasso$predito <- factor(resultados_lasso$predito, levels = c("Baixo","Alto"))
+
+resultados_lasso
+```
+### erro
+```{r} 
+      
+      erro_lasso <- mean(dados_test$satisfacao != pred_lasso1)  
+erro_lasso
+```
+
+## 5.5) Random Forest
+
+
+```{r}
+set.seed(123)
+met_rf <- randomForest::randomForest(satisfacao ~ ., data = df_train)
+      
+#resumo
+met_rf
+```
+
+### importância
+```{r}
+randomForest::varImpPlot(met_rf, pch = 19)
+```
+ 
+### resultados
+### predição
+```{r}  
+pred_rf <- predict(met_rf , newdata = df_test)
+
+  resultados_rf <- tibble(observado = df_test$satisfacao, 
+                           predito = pred_rf)
+resultados_rf
+```
+
+### erro 
+```{r}  
+erro_rf <- mean(df_test$satisfacao != pred_rf)  
+erro_rf
+```
+
+## 5.6) Bagging 
+
+```{r} 
+met_bagging <- ipred::bagging(satisfacao ~ ., data = df_train, coob = TRUE)
+```  
+
+
+### predição
+```{r}   
+pred_bag <- predict(met_bagging, newdata = df_test)
+```
+
+### resultados
+```{r}
+  resultados_bag <- tibble(observado = df_test$satisfacao,
+                           predito = pred_bag)
+resultados_bag
+```  
+  
+### erro
+  
+```{r}   
+erro_bag <- mean(df_test$satisfacao != pred_bag)
+erro_bag
+```
+
+
+# 6) Comparando os métodos 
+
+## 6.1) Erro Médio dos modelos
+
+
+### criando um tibble, i.e. uma base de dados, para guardarmos os resultados obtidos:  
+```{r}  
+
+  
+  erros <- c("Boosting" = 0.225057, "Regressão Logística" = 0.209392,"Ridge"=  0.229015, "Lasso"= 0.209561, "Random Forest" = 0.197043 , "Bagging" = 0.208309)
+  
+  erros_mod <- erros %>% 
+    enframe(name= "Método", value= "erro")
+  
+  erros_mod  %>% arrange((erro))  
+```
+ 
+  
+###  '''Melhores modelos (menor erro) 
+####  1) Random Forest
+####  2) Bagging
+####  3) Regressão Logística
+####  4) Lasso
+####  5) Boosting  
+####  6) Ridge
+
+## 6.2) Matriz de Confusão
+
+### Matriz de Confusão Random Forest
+```{r}
+
+CM_RF <- confusionMatrix(pred_rf, df_test$satisfacao)
+CM_RF
+```
+
+
+### Matriz de Confusão Bagging  
+```{r, warning=FALSE}
+CM_Bag <- confusionMatrix(resultados_bag$predito, resultados_bag$observado)
+CM_Bag
+```
+
+### Matriz de Confusão Regressão Logística
+```{r}
+
+CM_Log <- confusionMatrix(resultados_log$predito, resultados_log$observado)
+CM_Log
+```
+
+### Matriz de Confusão LASSO
+
+```{r}
+CM_Lasso <- confusionMatrix(resultados_lasso$predito, resultados_lasso$observado)
+CM_Lasso
+```
+
+
+### Matriz de Confusão Boosting
+
+```{r}
+CM_Boost <- confusionMatrix(resultados_bst$predito, resultados_bst$observado)
+
+CM_Boost
+```
+
+### Matriz de Confusão Ridge
+```{r}
+CM_Ridge <- confusionMatrix(resultados_ridge$predito, resultados_ridge$observado)
+CM_Ridge
+```
+
+
+```{r}  
+
+  
+  acuracia <- c("Boosting" = 0.7749 , "Regressão Logística" = 0.7906 ,"Ridge"=  0.7710, "Lasso"= 0.7904, "Random Forest" = 0.803 , "Bagging" = 0.7913)
+  
+  acuracia_modelos <- acuracia %>% 
+    enframe(name= "Método", value= "acuracia")
+  
+  acuracia_modelos  %>% arrange(desc(acuracia))  
+```
+
+A ordem dos modelos pela acurácia é a mesma do menor erro.
+
+###  '''Melhores modelos (melhor acurácia) 
+####  1) Random Forest
+####  2) Bagging
+####  3) Regressão Logística
+####  4) Lasso
+####  5) Boosting  
+####  6) Ridge
